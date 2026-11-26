@@ -70,8 +70,33 @@
       </div>
     </section>
 
+    <!-- Demo interactiva: planificador de mesas -->
+    <section class="section section--alt" id="mesas">
+      <div class="container">
+        <div class="section__head">
+          <p class="section__eyebrow">Pruébalo ahora</p>
+          <h2>Coloca a tus invitados en las mesas</h2>
+          <p>Así de fácil es organizar el banquete. Juega con la demo: no necesitas cuenta.</p>
+        </div>
+        <div class="seating" id="seating">
+          <aside class="seating__side">
+            <p class="seating__count"></p>
+            <div class="seating__bar"><span></span></div>
+            <p class="seating__hint"></p>
+            <div class="seating__guests" aria-label="Invitados sin mesa"></div>
+            <div class="seating__actions">
+              <button class="btn" type="button" data-action="add">+ Añadir mesa</button>
+              <button class="btn btn--ghost" type="button" data-action="reset">Reiniciar</button>
+            </div>
+          </aside>
+          <div class="seating__floor" aria-label="Salón"></div>
+          <div class="seating__toast" role="status"></div>
+        </div>
+      </div>
+    </section>
+
     <!-- Cómo funciona -->
-    <section class="section section--alt" id="como-funciona">
+    <section class="section" id="como-funciona">
       <div class="container">
         <div class="section__head">
           <p class="section__eyebrow">Cómo funciona</p>
@@ -95,7 +120,7 @@
     </section>
 
     <!-- Galería -->
-    <section class="section" id="galeria">
+    <section class="section section--alt" id="galeria">
       <div class="container">
         <div class="section__head">
           <p class="section__eyebrow">Inspiración</p>
@@ -111,7 +136,7 @@
     </section>
 
     <!-- Testimonios -->
-    <section class="section section--alt" id="testimonios">
+    <section class="section" id="testimonios">
       <div class="container">
         <div class="section__head">
           <p class="section__eyebrow">Testimonios</p>
@@ -144,5 +169,6 @@
 
   <div id="site-footer"></div>
   <script src="assets/js/layout.js"></script>
+  <script src="assets/js/seating.js"></script>
 </body>
 </html>

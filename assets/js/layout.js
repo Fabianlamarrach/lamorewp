@@ -9,6 +9,7 @@
 
   var menu = [
     { href: "index.html#servicios", label: "Servicios" },
+    { href: "index.html#mesas", label: "Plan de mesas" },
     { href: "index.html#como-funciona", label: "Cómo funciona" },
     { href: "index.html#galeria", label: "Galería" },
     { href: "index.html#testimonios", label: "Testimonios" }
