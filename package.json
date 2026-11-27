@@ -1,0 +1,10 @@
+{
+  "name": "lamorewp",
+  "private": true,
+  "scripts": {
+    "deploy": "npm run db:migrate && npm run web:deploy",
+    "web:deploy": "npx --yes wrangler@4 deploy",
+    "db:migrate": "node scripts/supabase-migrate.mjs",
+    "db:new": "node scripts/supabase-migrate.mjs --new"
+  }
+}

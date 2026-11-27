@@ -1,0 +1,8 @@
+{
+  // Despliegue en Cloudflare Workers (assets estáticos) -> lamorewp.com
+  // Desplegar: CLOUDFLARE_API_TOKEN=... npx wrangler deploy
+  "name": "lamorewp",
+  "account_id": "d18a0b6239f4c766db229a8fab452f33",
+  "compatibility_date": "2026-11-23",
+  "assets": { "directory": "." }
+}

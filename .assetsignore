@@ -1,0 +1,16 @@
+# Archivos que NO se publican en lamorewp.com
+.*
+.github
+.gitignore
+.assetsignore
+.wrangler
+.env
+.env.*
+.dev.vars
+node_modules
+scripts
+supabase
+package.json
+package-lock.json
+wrangler.jsonc
+*.md

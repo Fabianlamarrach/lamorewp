@@ -1,0 +1,31 @@
+# Cada push a main: aplica migraciones en Supabase y publica el sitio en Cloudflare (lamorewp.com).
+# Secretos necesarios en GitHub (Settings → Secrets and variables → Actions):
+#   CLOUDFLARE_API_TOKEN, SUPABASE_ACCESS_TOKEN
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: d18a0b6239f4c766db229a8fab452f33
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      SUPABASE_PROJECT_REF: ltnhxtomueleruuuqyjh
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Migraciones Supabase
+        run: npm run db:migrate
+      - name: Publicar en Cloudflare
+        run: npm run web:deploy
