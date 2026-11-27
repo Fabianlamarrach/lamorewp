@@ -1,10 +1,18 @@
 /* ==========================================================
-   Validación de los formularios de login y registro.
-   Solo frontend: conecta aquí tu backend (Supabase, Firebase,
-   API propia...) en las funciones onLogin / onRegister.
+   Formularios de login y registro.
+   La autenticación y los roles viven en session.js
+   (window.LAmore.auth); aquí solo se valida y se redirige.
    ========================================================== */
 (function () {
   var EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  var auth = window.LAmore.auth;
+
+  // Si ya hay sesión, login y registro llevan directamente al panel.
+  var me = auth.current();
+  if (me && (document.getElementById("login-form") || document.getElementById("register-form"))) {
+    location.replace(auth.homeFor(me));
+    return;
+  }
 
   function setError(input, msg) {
     var field = input.closest(".field");
@@ -21,6 +29,11 @@
     box.className = "form__message is-visible " + (ok ? "form__message--ok" : "form__message--error");
   }
 
+  function setBusy(form, busy) {
+    var btn = form.querySelector('[type="submit"]');
+    if (btn) btn.disabled = busy;
+  }
+
   // ---------- Login ----------
   var login = document.getElementById("login-form");
   if (login) {
@@ -33,12 +46,17 @@
       ].every(Boolean);
       if (!valid) return;
 
-      // TODO: sustituir por la llamada real de autenticación.
-      showMessage(login, "¡Bienvenidos de nuevo! (demo: aún no hay backend conectado)", true);
+      setBusy(login, true);
+      auth.login(email.value, pass.value, login.remember.checked)
+        .then(function (user) { location.href = auth.homeFor(user); })
+        .catch(function (err) {
+          showMessage(login, err.message, false);
+          setBusy(login, false);
+        });
     });
   }
 
-  // ---------- Registro ----------
+  // ---------- Registro (siempre crea una cuenta de pareja) ----------
   var register = document.getElementById("register-form");
   if (register) {
     register.addEventListener("submit", function (e) {
@@ -54,9 +72,19 @@
       ].every(Boolean);
       if (!valid) return;
 
-      // TODO: sustituir por la llamada real de registro.
-      showMessage(register, "¡Cuenta creada! Empieza a planificar vuestra boda. (demo: aún no hay backend conectado)", true);
-      register.reset();
+      setBusy(register, true);
+      auth.register({
+        name: f.name.value,
+        partner: f.partner.value,
+        email: f.email.value,
+        weddingDate: f.date.value,
+        password: f.password.value
+      })
+        .then(function (user) { location.href = auth.homeFor(user); })
+        .catch(function (err) {
+          showMessage(register, err.message, false);
+          setBusy(register, false);
+        });
     });
   }
 

@@ -29,6 +29,16 @@
       (isCurrent ? ' aria-current="page"' : "") + ">" + item.label + "</a></li>";
   }
 
+  // Botones de la cabecera según haya sesión o no (ver session.js).
+  var auth = window.LAmore && window.LAmore.auth;
+  var me = auth && auth.current();
+  var actions = me
+    ? '<a class="btn btn--ghost" href="' + auth.homeFor(me) + '">' +
+        (me.role === auth.ROLES.SUPERADMIN ? "Panel admin" : "Mi panel") + "</a>" +
+      '<button class="btn" type="button" data-logout>Cerrar sesión</button>'
+    : '<a class="btn btn--ghost" href="' + root + 'login.html">Iniciar sesión</a>' +
+      '<a class="btn" href="' + root + 'registro.html">Crear cuenta</a>';
+
   var header =
     '<header class="site-header">' +
       '<div class="container site-header__inner">' +
@@ -38,10 +48,7 @@
         "</button>" +
         '<nav class="nav" id="main-nav" aria-label="Principal">' +
           '<ul class="nav__list">' + menu.map(link).join("") + "</ul>" +
-          '<div class="nav__actions">' +
-            '<a class="btn btn--ghost" href="' + root + 'login.html">Iniciar sesión</a>' +
-            '<a class="btn" href="' + root + 'registro.html">Crear cuenta</a>' +
-          "</div>" +
+          '<div class="nav__actions">' + actions + "</div>" +
         "</nav>" +
       "</div>" +
     "</header>";
@@ -68,6 +75,14 @@
   var f = document.getElementById("site-footer");
   if (h) h.outerHTML = header;
   if (f) f.outerHTML = footer;
+
+  var logoutBtn = document.querySelector("[data-logout]");
+  if (logoutBtn) {
+    logoutBtn.addEventListener("click", function () {
+      auth.logout();
+      location.href = root + "index.html";
+    });
+  }
 
   // Menú móvil
   var toggle = document.querySelector(".nav-toggle");
