@@ -30,14 +30,17 @@
   }
 
   // Botones de la cabecera según haya sesión o no (ver session.js).
+  // Se pintan primero con la copia en caché y se corrigen cuando responde Supabase.
   var auth = window.LAmore && window.LAmore.auth;
-  var me = auth && auth.current();
-  var actions = me
-    ? '<a class="btn btn--ghost" href="' + auth.homeFor(me) + '">' +
-        (me.role === auth.ROLES.SUPERADMIN ? "Panel admin" : "Mi panel") + "</a>" +
-      '<button class="btn" type="button" data-logout>Cerrar sesión</button>'
-    : '<a class="btn btn--ghost" href="' + root + 'login.html">Iniciar sesión</a>' +
-      '<a class="btn" href="' + root + 'registro.html">Crear cuenta</a>';
+  function actionsHTML(me) {
+    return me
+      ? '<a class="btn btn--ghost" href="' + auth.homeFor(me) + '">' +
+          (me.role === auth.ROLES.SUPERADMIN ? "Panel admin" : "Mi panel") + "</a>" +
+        '<button class="btn" type="button" data-logout>Cerrar sesión</button>'
+      : '<a class="btn btn--ghost" href="' + root + 'login.html">Iniciar sesión</a>' +
+        '<a class="btn" href="' + root + 'registro.html">Crear cuenta</a>';
+  }
+  var actions = actionsHTML(auth && auth.cached());
 
   var header =
     '<header class="site-header">' +
@@ -76,12 +79,13 @@
   if (h) h.outerHTML = header;
   if (f) f.outerHTML = footer;
 
-  var logoutBtn = document.querySelector("[data-logout]");
-  if (logoutBtn) {
-    logoutBtn.addEventListener("click", function () {
-      auth.logout();
-      location.href = root + "index.html";
+  var actionsBox = document.querySelector(".nav__actions");
+  if (actionsBox && auth) {
+    actionsBox.addEventListener("click", function (e) {
+      if (!e.target.closest("[data-logout]")) return;
+      auth.logout().then(function () { location.href = root + "index.html"; });
     });
+    auth.me().then(function (me) { actionsBox.innerHTML = actionsHTML(me); }, function () {});
   }
 
   // Menú móvil

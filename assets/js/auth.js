@@ -1,18 +1,14 @@
 /* ==========================================================
-   Formularios de login y registro.
+   Formularios de login, registro y recuperación de contraseña.
    La autenticación y los roles viven en session.js
    (window.LAmore.auth); aquí solo se valida y se redirige.
    ========================================================== */
 (function () {
   var EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
   var auth = window.LAmore.auth;
-
-  // Si ya hay sesión, login y registro llevan directamente al panel.
-  var me = auth.current();
-  if (me && (document.getElementById("login-form") || document.getElementById("register-form"))) {
-    location.replace(auth.homeFor(me));
-    return;
-  }
+  var login = document.getElementById("login-form");
+  var register = document.getElementById("register-form");
+  var recovering = /type=recovery/.test(location.hash);
 
   function setError(input, msg) {
     var field = input.closest(".field");
@@ -34,8 +30,13 @@
     if (btn) btn.disabled = busy;
   }
 
+  // Si ya hay sesión, login y registro llevan directamente al panel
+  // (también al volver del enlace de confirmación del correo).
+  if ((login || register) && !recovering) {
+    auth.me().then(function (me) { if (me) location.replace(auth.homeFor(me)); }, function () {});
+  }
+
   // ---------- Login ----------
-  var login = document.getElementById("login-form");
   if (login) {
     login.addEventListener("submit", function (e) {
       e.preventDefault();
@@ -48,16 +49,66 @@
 
       setBusy(login, true);
       auth.login(email.value, pass.value, login.remember.checked)
-        .then(function (user) { location.href = auth.homeFor(user); })
+        .then(function (user) {
+          if (!user) throw new Error("Tu cuenta no tiene perfil. Escríbenos y lo revisamos.");
+          location.href = auth.homeFor(user);
+        })
         .catch(function (err) {
           showMessage(login, err.message, false);
           setBusy(login, false);
         });
     });
+
+    // ¿Olvidaste tu contraseña? -> envía el enlace al correo escrito arriba.
+    var forgot = document.querySelector("[data-forgot]");
+    if (forgot) {
+      forgot.addEventListener("click", function (e) {
+        e.preventDefault();
+        if (!setError(login.email, EMAIL_RE.test(login.email.value.trim()) ? "" : "Escribe aquí tu correo y vuelve a pulsar «¿Olvidaste tu contraseña?».")) {
+          login.email.focus();
+          return;
+        }
+        auth.resetPassword(login.email.value)
+          .then(function () { showMessage(login, "Si existe una cuenta con ese correo, te hemos enviado un enlace para crear una contraseña nueva.", true); })
+          .catch(function (err) { showMessage(login, err.message, false); });
+      });
+    }
+
+    // Vuelta desde el enlace de recuperación: pedir la contraseña nueva.
+    if (recovering) {
+      var box = login.parentNode;
+      box.querySelector("h1").textContent = "Nueva contraseña";
+      box.querySelector("h1 + p").textContent = "Elige una contraseña nueva para tu cuenta.";
+      login.hidden = true;
+      var reset = document.createElement("form");
+      reset.className = "form";
+      reset.noValidate = true;
+      reset.innerHTML =
+        '<div class="form__message" role="status"></div>' +
+        '<div class="field"><label for="new-password">Contraseña nueva</label>' +
+        '<input type="password" id="new-password" name="password" autocomplete="new-password" minlength="8" required>' +
+        '<span class="field__error"></span></div>' +
+        '<button class="btn btn--block" type="submit">Guardar contraseña</button>';
+      login.parentNode.insertBefore(reset, login);
+      reset.addEventListener("submit", function (e) {
+        e.preventDefault();
+        if (!setError(reset.password, reset.password.value.length >= 8 ? "" : "Mínimo 8 caracteres.")) return;
+        setBusy(reset, true);
+        auth.client.auth.updateUser({ password: reset.password.value })
+          .then(function (r) {
+            if (r.error) throw new Error(auth.friendly(r.error));
+            return auth.me();
+          })
+          .then(function (me) { location.href = auth.homeFor(me); })
+          .catch(function (err) {
+            showMessage(reset, err.message, false);
+            setBusy(reset, false);
+          });
+      });
+    }
   }
 
   // ---------- Registro (siempre crea una cuenta de pareja) ----------
-  var register = document.getElementById("register-form");
   if (register) {
     register.addEventListener("submit", function (e) {
       e.preventDefault();
@@ -80,7 +131,15 @@
         weddingDate: f.date.value,
         password: f.password.value
       })
-        .then(function (user) { location.href = auth.homeFor(user); })
+        .then(function (res) {
+          if (res.needsConfirmation) {
+            register.reset();
+            showMessage(register, "¡Cuenta creada! Te hemos enviado un correo: pulsa el enlace para confirmarla y luego inicia sesión.", true);
+            setBusy(register, false);
+            return;
+          }
+          location.href = auth.homeFor(res.user);
+        })
         .catch(function (err) {
           showMessage(register, err.message, false);
           setBusy(register, false);

@@ -23,54 +23,134 @@
         <p id="admin-hello"></p>
       </div>
 
-      <div class="stats">
-        <div class="stat"><div class="stat__label">Parejas registradas</div><div class="stat__value" id="stat-couples">0</div></div>
-        <div class="stat"><div class="stat__label">Bodas en 90 días</div><div class="stat__value" id="stat-upcoming">0</div></div>
-        <div class="stat"><div class="stat__label">Altas en 30 días</div><div class="stat__value" id="stat-new">0</div></div>
-        <div class="stat"><div class="stat__label">Superadmins</div><div class="stat__value" id="stat-admins">0</div></div>
+      <div class="form__message" id="admin-message" role="status"></div>
+
+      <!-- ===== Lista: bodas y usuarios ===== -->
+      <div id="view-list">
+        <div class="stats">
+          <div class="stat"><div class="stat__label">Bodas</div><div class="stat__value" id="stat-weddings">0</div></div>
+          <div class="stat"><div class="stat__label">Bodas en 90 días</div><div class="stat__value" id="stat-upcoming">0</div></div>
+          <div class="stat"><div class="stat__label">Confirmadas</div><div class="stat__value" id="stat-confirmed">0</div></div>
+          <div class="stat"><div class="stat__label">Presupuesto total</div><div class="stat__value stat__value--sm" id="stat-budget">—</div></div>
+        </div>
+
+        <div class="tabs" role="tablist" aria-label="Secciones">
+          <button class="tabs__tab" type="button" role="tab" id="tab-weddings" aria-controls="panel-weddings" aria-selected="true">Bodas</button>
+          <button class="tabs__tab" type="button" role="tab" id="tab-users" aria-controls="panel-users" aria-selected="false">Usuarios</button>
+        </div>
+
+        <section class="panel" id="panel-weddings" role="tabpanel" aria-labelledby="tab-weddings">
+          <div class="toolbar">
+            <div class="field">
+              <label for="w-search">Buscar</label>
+              <input type="search" id="w-search" placeholder="Pareja, correo, lugar…">
+            </div>
+            <div class="field field--narrow">
+              <label for="w-status">Estado</label>
+              <select id="w-status"><option value="">Todos</option></select>
+            </div>
+            <div class="field field--narrow">
+              <label for="w-when">Fecha</label>
+              <select id="w-when">
+                <option value="upcoming">Próximas primero</option>
+                <option value="all">Todas (más recientes)</option>
+                <option value="past">Ya celebradas</option>
+                <option value="nodate">Sin fecha</option>
+              </select>
+            </div>
+          </div>
+          <div class="data-table-wrap">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Pareja</th>
+                  <th>Fecha</th>
+                  <th>Lugar</th>
+                  <th class="num">Invitados</th>
+                  <th class="num">Presupuesto</th>
+                  <th class="num">Previsto / pagado</th>
+                  <th>Estado</th>
+                  <th><span class="visually-hidden">Acciones</span></th>
+                </tr>
+              </thead>
+              <tbody id="weddings-body"></tbody>
+            </table>
+          </div>
+          <p class="empty" id="weddings-empty" hidden>No hay bodas que coincidan.</p>
+        </section>
+
+        <section class="panel" id="panel-users" role="tabpanel" aria-labelledby="tab-users" hidden>
+          <div class="toolbar">
+            <div class="field">
+              <label for="u-search">Buscar</label>
+              <input type="search" id="u-search" placeholder="Nombre o correo">
+            </div>
+            <div class="field field--narrow">
+              <label for="u-role">Rol</label>
+              <select id="u-role">
+                <option value="">Todos</option>
+                <option value="pareja">Parejas</option>
+                <option value="superadmin">Superadmins</option>
+              </select>
+            </div>
+          </div>
+          <div class="data-table-wrap">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Usuario</th>
+                  <th>Alta</th>
+                  <th>Rol</th>
+                  <th><span class="visually-hidden">Acciones</span></th>
+                </tr>
+              </thead>
+              <tbody id="users-body"></tbody>
+            </table>
+          </div>
+          <p class="empty" id="users-empty" hidden>No hay usuarios que coincidan.</p>
+        </section>
       </div>
 
-      <section class="panel">
-        <h2>Usuarios</h2>
-        <div class="form__message" id="admin-message" role="status"></div>
-
-        <div class="toolbar">
-          <div class="field">
-            <label for="search">Buscar</label>
-            <input type="search" id="search" placeholder="Nombre o correo">
-          </div>
-          <div class="field field--narrow">
-            <label for="role-filter">Rol</label>
-            <select id="role-filter">
-              <option value="">Todos</option>
-              <option value="pareja">Parejas</option>
-              <option value="superadmin">Superadmins</option>
-            </select>
-          </div>
+      <!-- ===== Detalle de una boda (#boda=<id>) ===== -->
+      <div id="view-detail" hidden>
+        <p><a href="#" id="back-link">← Volver a todas las bodas</a></p>
+        <div class="detail-head">
+          <h2 id="d-names"></h2>
+          <p id="d-meta"></p>
         </div>
 
-        <div class="data-table-wrap">
-          <table class="data-table">
-            <thead>
-              <tr>
-                <th>Usuario</th>
-                <th>Fecha de boda</th>
-                <th>Alta</th>
-                <th>Rol</th>
-                <th><span class="visually-hidden">Acciones</span></th>
-              </tr>
-            </thead>
-            <tbody id="users-body"></tbody>
-          </table>
+        <div class="dash__grid">
+          <section class="panel">
+            <h2>Datos de la boda</h2>
+            <div id="d-form"></div>
+          </section>
+          <aside class="panel">
+            <h2>Notas internas</h2>
+            <p class="panel__note">Solo las ve el equipo; la pareja no tiene acceso.</p>
+            <form class="form" id="notes-form" novalidate>
+              <div class="form__message" role="status"></div>
+              <div class="field">
+                <label for="notes" class="visually-hidden">Notas</label>
+                <textarea id="notes" name="notes" rows="10" maxlength="10000" placeholder="Llamadas, preferencias, proveedores contactados…"></textarea>
+              </div>
+              <div><button class="btn btn--sm" type="submit">Guardar notas</button></div>
+            </form>
+          </aside>
         </div>
-        <p class="empty" id="users-empty" hidden>No hay usuarios que coincidan.</p>
-      </section>
+
+        <section class="panel panel--spaced">
+          <h2>Presupuesto</h2>
+          <div id="d-budget"></div>
+        </section>
+      </div>
     </div>
   </main>
 
   <div id="site-footer"></div>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.49.4/dist/umd/supabase.js"></script>
   <script src="../assets/js/session.js"></script>
   <script src="../assets/js/layout.js"></script>
+  <script src="../assets/js/wedding-ui.js"></script>
   <script src="../assets/js/admin.js"></script>
 </body>
 </html>
