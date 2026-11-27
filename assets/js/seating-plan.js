@@ -1,11 +1,14 @@
 /* ==========================================================
    Plan de mesas de una boda (panel de pareja y de superadmin).
-   - Salón: lienzo lógico de 1000 x 625 que se escala al ancho
-     disponible. Mesas y elementos (pista, barra…) se arrastran
-     para colocarlos; la posición se guarda en wedding_tables.
+   - Salón visto desde arriba (suelo de madera): lienzo lógico de
+     1000 x 625 que se escala al ancho disponible. Mesas y elementos
+     (pista, barra…) se arrastran para colocarlos; la posición se
+     guarda en wedding_tables.
+   - Bandeja inferior con dos pestañas: «Invitados» (agrupados por
+     familia / grupo, con su color) y «Elementos» (añadir al salón).
    - Invitados: se arrastran a una mesa o a una silla concreta
      (en móvil: tocar invitado y después mesa o silla).
-   - Al tocar una mesa o un invitado se abre su ficha a la derecha.
+   - Al tocar una mesa o un invitado se abre su ficha flotante.
    Necesita session.js y wedding-ui.js. Textos de usuario siempre
    con textContent.
    ========================================================== */
@@ -29,6 +32,9 @@
     sin_gluten: ["Sin gluten", "SG"], infantil: ["Infantil", "N"], alergias: ["Alergias (ver notas)", "!"]
   };
   var RSVP = { pendiente: "Pendiente", confirmado: "Confirmado", rechazado: "No viene" };
+  // Colores de grupo: oscuros para que las iniciales blancas se lean sobre la madera.
+  var PALETTE = ["#8e3b52", "#3f5a7a", "#4f7a5a", "#a0652f", "#6b4f8a", "#2f7880", "#a34b3b", "#5d6b2f", "#7a4f6a", "#4a6b9a"];
+  var SIDE_COLORS = { p1: "#a8586a", p2: "#4f6f8a", comun: "#94743a" };
 
   function isTable(t) { return t.kind === "redonda" || t.kind === "rectangular"; }
 
@@ -38,20 +44,30 @@
     return { w: KINDS[t.kind].w, h: KINDS[t.kind].h };
   }
 
-  // Posición de la silla i respecto al centro de la mesa.
+  // Posición de la silla i respecto al centro de la mesa (y giro para mirar a la mesa).
   function seatPos(t, i) {
     var s = size(t);
     if (t.kind === "redonda") {
-      var a = (i / t.seats) * Math.PI * 2 - Math.PI / 2, r = s.w / 2 + 16;
-      return { x: Math.cos(a) * r, y: Math.sin(a) * r };
+      var a = (i / t.seats) * Math.PI * 2 - Math.PI / 2, r = s.w / 2 + 15;
+      return { x: Math.cos(a) * r, y: Math.sin(a) * r, rot: a * 180 / Math.PI + 90 };
     }
     var n = Math.ceil(t.seats / 2), top = i < n, j = top ? i : i - n;
-    return { x: -s.w / 2 + 25 + j * 34, y: top ? -s.h / 2 - 16 : s.h / 2 + 16 };
+    return { x: -s.w / 2 + 25 + j * 34, y: top ? -s.h / 2 - 15 : s.h / 2 + 15, rot: top ? 0 : 180 };
+  }
+  // Plato (cubierto) de la silla i, sobre el mantel.
+  function platePos(t, i) {
+    var s = size(t);
+    if (t.kind === "redonda") {
+      var a = (i / t.seats) * Math.PI * 2 - Math.PI / 2, r = s.w / 2 - 12;
+      return { x: Math.cos(a) * r, y: Math.sin(a) * r };
+    }
+    var p = seatPos(t, i);
+    return { x: p.x, y: p.y < 0 ? -s.h / 2 + 12 : s.h / 2 - 12 };
   }
 
   // Caja que ocupa (con sillas) para que no se salga del salón.
   function extent(t) {
-    var s = size(t), pad = isTable(t) ? 32 : 0;
+    var s = size(t), pad = isTable(t) ? 30 : 0;
     return { w: s.w / 2 + pad, h: s.h / 2 + pad };
   }
   function clamp(t, x, y) {
@@ -65,11 +81,25 @@
   function initials(name) {
     return name.trim().split(/\s+/).map(function (w) { return w[0]; }).join("").slice(0, 2).toUpperCase();
   }
+  function firstName(name) { return name.trim().split(/\s+/)[0]; }
+  function hash(str) {
+    var h = 0;
+    for (var i = 0; i < str.length; i++) h = (h * 31 + str.charCodeAt(i)) | 0;
+    return Math.abs(h);
+  }
+
+  // Lo que se ve en el centro de la mesa: el número si se llama «Mesa 7», si no el nombre.
+  function badgeText(t) {
+    var name = (t.name || "").trim();
+    var m = name.match(/^mesa\s*(\d{1,3})$/i) || name.match(/^(\d{1,3})$/);
+    return m ? { text: m[1], num: true } : { text: name || "Mesa", num: false };
+  }
 
   function seatingPlan(container, wedding) {
     var tables = [], guests = [];
     var selGuest = null, selTable = null;
-    var filter = "pending", query = "";
+    var filter = "pending", query = "", tab = "invitados";
+    var hasGroup = false; // la columna group_name existe (migración aplicada)
 
     function sides() {
       return {
@@ -78,63 +108,86 @@
         comun: "Comunes"
       };
     }
+    function groupOf(g) {
+      var name = hasGroup && g.group_name ? g.group_name.trim() : "";
+      if (name) return { key: "g:" + name.toLowerCase(), label: name, color: PALETTE[hash(name.toLowerCase()) % PALETTE.length], named: true };
+      return { key: "s:" + g.side, label: sides()[g.side] || "Invitados", color: SIDE_COLORS[g.side] || SIDE_COLORS.comun, named: false };
+    }
+    function groupNames() {
+      var seen = {}, out = [];
+      guests.forEach(function (g) {
+        var n = (g.group_name || "").trim();
+        if (n && !seen[n.toLowerCase()]) { seen[n.toLowerCase()] = 1; out.push(n); }
+      });
+      return out.sort(function (a, b) { return a.localeCompare(b, "es"); });
+    }
     function byId(list, id) { return list.filter(function (x) { return x.id === id; })[0]; }
     function seatedAt(tid) { return guests.filter(function (g) { return g.table_id === tid; }); }
     function guestAt(tid, i) { return guests.filter(function (g) { return g.table_id === tid && g.seat === i; })[0]; }
+    function tableName(t) { return t.name || KINDS[t.kind].label; }
     function fail(err) { toast(auth.friendly(err), true); load(); }
 
     // ---------- Estructura ----------
     var stats = el("p", { className: "plan__stats" });
-    var addSelect = el("select", { "aria-label": "Añadir al salón" }, [el("option", { value: "", text: "+ Añadir al salón…" })]
-      .concat(Object.keys(KINDS).map(function (k) { return el("option", { value: k, text: KINDS[k].label }); })));
     var printBtn = el("button", { type: "button", className: "btn btn--sm btn--ghost", text: "Imprimir plano" });
-    var toolbar = el("div", { className: "plan__toolbar" }, [
-      stats,
-      el("div", { className: "plan__tools" }, [
-        el("button", { type: "button", className: "btn btn--sm", "data-add": "redonda", text: "+ Mesa redonda" }),
-        el("button", { type: "button", className: "btn btn--sm", "data-add": "rectangular", text: "+ Mesa rectangular" }),
-        addSelect, printBtn
-      ])
-    ]);
-
-    var hint = el("p", { className: "plan__hint" });
-    var search = el("input", { type: "search", placeholder: "Buscar invitado", "aria-label": "Buscar invitado" });
-    var filterSel = el("select", { "aria-label": "Mostrar" }, [
-      el("option", { value: "pending", text: "Sin mesa" }), el("option", { value: "all", text: "Todos" })
-    ]);
-    var list = el("div", { className: "plan__guests", "aria-label": "Invitados" });
-
-    var addName = el("input", { type: "text", maxlength: 120, placeholder: "Nombre y apellido", "aria-label": "Nombre del invitado" });
-    var addSide = el("select", { "aria-label": "Lado" });
-    var addMenu = el("select", { "aria-label": "Menú" }, Object.keys(MENUS).map(function (k) { return el("option", { value: k, text: MENUS[k][0] }); }));
-    var addForm = el("form", { className: "plan__add", novalidate: true }, [
-      addName, el("div", { className: "plan__add-row" }, [addSide, addMenu]),
-      el("button", { type: "submit", className: "btn btn--sm", text: "Añadir invitado" })
-    ]);
-    var bulkText = el("textarea", { rows: 5, placeholder: "Un invitado por línea", "aria-label": "Lista de invitados" });
-    var bulkSide = el("select", { "aria-label": "Lado de la lista" });
-    var bulk = el("details", { className: "plan__bulk" }, [
-      el("summary", { text: "Añadir una lista de golpe" }),
-      el("form", { novalidate: true }, [bulkText, bulkSide, el("button", { type: "submit", className: "btn btn--sm btn--ghost", text: "Añadir todos" })])
-    ]);
-
-    var inspector = el("div", { className: "plan__inspector" });
-    var side = el("aside", { className: "plan__side" }, [
-      inspector, hint, el("div", { className: "plan__filter" }, [search, filterSel]), list, addForm, bulk
-    ]);
+    var toolbar = el("div", { className: "plan__toolbar" }, [stats, el("div", { className: "plan__tools" }, [printBtn])]);
 
     var stage = el("div", { className: "plan__stage" });
     var floor = el("div", { className: "plan__floor", "aria-label": "Plano del salón" }, [stage]);
-    var legend = el("p", { className: "plan__legend" }, [
-      "Arrastra las mesas para colocarlas; tócalas para editarlas. Letras en las sillas: ",
-      el("b", { text: "V" }), " vegetariano · ", el("b", { text: "VG" }), " vegano · ", el("b", { text: "SG" }), " sin gluten · ",
-      el("b", { text: "N" }), " infantil · ", el("b", { text: "!" }), " alergias (borde dorado = menú especial)."
+    var inspector = el("div", { className: "plan__inspector" });
+    var hint = el("p", { className: "plan__hint", role: "status" });
+    var room = el("div", { className: "plan__room" }, [floor, hint, inspector]);
+
+    // Bandeja inferior
+    var tabGuests = el("button", { type: "button", className: "plan__tab", role: "tab", "data-tab": "invitados", text: "Invitados" });
+    var tabElems = el("button", { type: "button", className: "plan__tab", role: "tab", "data-tab": "elementos", text: "Elementos" });
+    var search = el("input", { type: "search", placeholder: "Buscar", "aria-label": "Buscar invitado o grupo" });
+    var filterSel = el("select", { "aria-label": "Mostrar" }, [
+      el("option", { value: "pending", text: "Sin mesa" }), el("option", { value: "all", text: "Todos" })
     ]);
-    var main = el("div", { className: "plan__main" }, [floor, legend]);
+    var trayHead = el("div", { className: "plan__tray-head" }, [
+      el("div", { className: "plan__tabs", role: "tablist", "aria-label": "Bandeja" }, [tabGuests, tabElems]),
+      el("label", { className: "plan__search" }, [search]),
+      filterSel
+    ]);
+    var list = el("div", { className: "plan__groups", "aria-label": "Invitados" });
+
+    var groupList = el("datalist", { id: "plan-groups-" + Math.random().toString(36).slice(2, 8) });
+    var addName = el("input", { type: "text", maxlength: 120, placeholder: "Nombre y apellido", "aria-label": "Nombre del invitado" });
+    var addGroup = el("input", { type: "text", maxlength: 60, placeholder: "Grupo / familia (opcional)", "aria-label": "Grupo o familia", list: groupList.id });
+    var addSide = el("select", { "aria-label": "Lado" });
+    var addMenu = el("select", { "aria-label": "Menú" }, Object.keys(MENUS).map(function (k) { return el("option", { value: k, text: MENUS[k][0] }); }));
+    var addForm = el("form", { className: "plan__add", novalidate: true }, [
+      addName, addGroup, addSide, addMenu,
+      el("button", { type: "submit", className: "btn btn--sm", text: "Añadir" })
+    ]);
+    var bulkText = el("textarea", { rows: 4, placeholder: "Un invitado por línea", "aria-label": "Lista de invitados" });
+    var bulkGroup = el("input", { type: "text", maxlength: 60, placeholder: "Grupo / familia (opcional)", "aria-label": "Grupo de la lista", list: groupList.id });
+    var bulkSide = el("select", { "aria-label": "Lado de la lista" });
+    var bulk = el("details", { className: "plan__bulk" }, [
+      el("summary", { text: "Añadir una lista de golpe" }),
+      el("form", { novalidate: true }, [bulkText, el("div", { className: "plan__bulk-row" }, [bulkGroup, bulkSide,
+        el("button", { type: "submit", className: "btn btn--sm btn--ghost", text: "Añadir todos" })])])
+    ]);
+    var paneGuests = el("div", { className: "plan__pane", role: "tabpanel" }, [list, addForm, bulk, groupList]);
+
+    var paneElems = el("div", { className: "plan__pane plan__elements", role: "tabpanel" }, Object.keys(KINDS).map(function (k) {
+      return el("button", { type: "button", className: "plan__tile", "data-add": k }, [
+        el("span", { className: "plan__tile-pic plan__tile-pic--" + k, "aria-hidden": "true" }),
+        el("span", { text: KINDS[k].label })
+      ]);
+    }));
+
+    var tray = el("div", { className: "plan__tray" }, [trayHead, paneGuests, paneElems]);
+    var legend = el("p", { className: "plan__legend" }, [
+      "Arrastra las mesas para colocarlas y a los invitados hasta su silla (en móvil: toca al invitado y después la mesa). Letras junto a la silla: ",
+      el("b", { text: "V" }), " vegetariano · ", el("b", { text: "VG" }), " vegano · ", el("b", { text: "SG" }), " sin gluten · ",
+      el("b", { text: "N" }), " infantil · ", el("b", { text: "!" }), " alergias."
+    ]);
     var toastBox = el("div", { className: "plan__toast", role: "status" });
     var printList = el("div", { className: "plan__print" });
 
-    var root = el("div", { className: "plan" }, [toolbar, el("div", { className: "plan__layout" }, [side, main]), toastBox, printList]);
+    var root = el("div", { className: "plan" }, [toolbar, room, tray, legend, toastBox, printList]);
     container.textContent = "";
     container.appendChild(root);
 
@@ -146,6 +199,10 @@
         Object.keys(s).forEach(function (k) { sel.appendChild(el("option", { value: k, text: s[k] })); });
         sel.value = v;
       });
+    }
+    function showGroupInputs() {
+      addGroup.hidden = !hasGroup;
+      bulkGroup.hidden = !hasGroup;
     }
 
     // ---------- Escala del salón ----------
@@ -165,68 +222,112 @@
     }
 
     // ---------- Pintado ----------
-    function chip(g) {
-      var m = MENUS[g.menu] || MENUS.normal;
-      var c = el("button", {
-        type: "button", className: "guest guest--" + g.side + (selGuest === g.id ? " is-selected" : "") + (g.table_id ? " is-seated" : "") + (g.rsvp === "rechazado" ? " is-declined" : ""),
-        draggable: "true", "data-guest": g.id, title: m[1] ? g.name + " · " + m[0] : g.name
-      }, [g.name, m[1] ? el("span", { className: "guest__menu", text: m[1] }) : null]);
-      return c;
+    function avatar(g) {
+      var m = MENUS[g.menu] || MENUS.normal, gr = groupOf(g);
+      var b = el("button", {
+        type: "button",
+        className: "gav" + (selGuest === g.id ? " is-selected" : "") + (g.table_id ? " is-seated" : "") + (g.rsvp === "rechazado" ? " is-declined" : ""),
+        draggable: "true", "data-guest": g.id,
+        title: g.name + (m[1] ? " · " + m[0] : "") + (g.table_id ? " · sentado" : "") + (g.rsvp === "rechazado" ? " · no viene" : "")
+      }, [
+        el("span", { className: "gav__circle" }, [initials(g.name), m[1] ? el("span", { className: "gav__menu", text: m[1] }) : null]),
+        el("span", { className: "gav__name", text: firstName(g.name) })
+      ]);
+      b.style.setProperty("--c", gr.color);
+      return b;
     }
 
     function renderList() {
-      var s = sides();
       var q = query.toLowerCase();
       var shown = guests.filter(function (g) {
         if (filter === "pending" && (g.table_id || g.rsvp === "rechazado")) return false;
-        return !q || g.name.toLowerCase().indexOf(q) !== -1;
+        return !q || g.name.toLowerCase().indexOf(q) !== -1 || (g.group_name || "").toLowerCase().indexOf(q) !== -1;
       });
+      var groups = {}, order = [];
+      shown.forEach(function (g) {
+        var gr = groupOf(g);
+        if (!groups[gr.key]) { groups[gr.key] = { info: gr, items: [] }; order.push(gr.key); }
+        groups[gr.key].items.push(g);
+      });
+      var sideOrder = ["s:p1", "s:p2", "s:comun"];
+      order.sort(function (a, b) {
+        var A = groups[a].info, B = groups[b].info;
+        if (A.named !== B.named) return A.named ? -1 : 1;
+        if (A.named) return A.label.localeCompare(B.label, "es");
+        return sideOrder.indexOf(a) - sideOrder.indexOf(b);
+      });
+
       list.textContent = "";
-      Object.keys(s).forEach(function (k) {
-        var inGroup = shown.filter(function (g) { return g.side === k; });
-        if (!inGroup.length) return;
-        list.appendChild(el("div", { className: "guest-group" }, [
-          el("p", { className: "guest-group__title guest-group__title--" + k, text: s[k] + " (" + inGroup.length + ")" }),
-          el("div", { className: "guest-group__chips" }, inGroup.map(chip))
-        ]));
+      order.forEach(function (k) {
+        var gr = groups[k];
+        var card = el("div", { className: "gcard" }, [
+          el("p", { className: "gcard__title" }, [
+            el("span", { className: "gcard__icon", "aria-hidden": "true" }),
+            el("span", { className: "gcard__label", text: gr.info.label }),
+            el("span", { className: "gcard__count", text: " · " + gr.items.length })
+          ]),
+          el("div", { className: "gcard__people" }, gr.items.map(avatar))
+        ]);
+        card.style.setProperty("--c", gr.info.color);
+        list.appendChild(card);
       });
       if (!shown.length) {
         list.appendChild(el("p", { className: "plan__empty", text: !guests.length
-          ? "Aún no hay invitados. Añádelos abajo."
+          ? "Aún no hay invitados. Añádelos aquí debajo."
           : filter === "pending" && !q ? "¡Todos tienen mesa! 🥂" : "Nadie coincide." }));
       }
+
+      groupList.textContent = "";
+      groupNames().forEach(function (n) { groupList.appendChild(el("option", { value: n })); });
     }
 
     function tableNode(t) {
-      var s = size(t), seated = seatedAt(t.id);
+      var s = size(t), seated = seatedAt(t.id), full = isTable(t) && seated.length >= t.seats;
       var node = el("div", {
         className: "ptable ptable--" + t.kind + (selTable === t.id ? " is-selected" : "") + (selGuest && isTable(t) ? " is-target" : "") +
-          (isTable(t) && seated.length >= t.seats ? " is-full" : ""),
+          (full ? " is-full" : ""),
         "data-table": t.id, tabindex: "0", role: "button",
-        "aria-label": (t.name || KINDS[t.kind].label) + (isTable(t) ? ", " + seated.length + " de " + t.seats + " plazas" : "")
+        "aria-label": tableName(t) + (isTable(t) ? ", " + seated.length + " de " + t.seats + " plazas" : "")
       });
       node.style.left = t.x - s.w / 2 + "px";
       node.style.top = t.y - s.h / 2 + "px";
       node.style.width = s.w + "px";
       node.style.height = s.h + "px";
 
-      node.appendChild(el("div", { className: "ptable__top" }, [
-        el("strong", { text: t.name || KINDS[t.kind].label }),
-        isTable(t) ? el("span", { text: seated.length + "/" + t.seats }) : null
-      ]));
-
       if (isTable(t)) {
-        for (var i = 0; i < t.seats; i++) {
-          var p = seatPos(t, i), g = guestAt(t.id, i);
+        var i, p;
+        // Sillas (debajo del mantel) con el invitado sentado encima.
+        for (i = 0; i < t.seats; i++) {
+          p = seatPos(t, i);
+          var g = guestAt(t.id, i), gr = g && groupOf(g), m = g && (MENUS[g.menu] || MENUS.normal);
           var seat = el("div", {
-            className: "pseat" + (g ? " is-taken pseat--" + g.side + (g.menu !== "normal" ? " has-menu" : "") + (selGuest === g.id ? " is-selected" : "") : ""),
-            "data-seat": i, title: g ? g.name + (g.menu !== "normal" ? " · " + MENUS[g.menu][0] : "") : "Silla libre"
-          }, [g ? initials(g.name) : ""]);
-          if (g) { seat.setAttribute("data-guest", g.id); seat.draggable = true; }
+            className: "pseat" + (g ? " is-taken" + (g.menu !== "normal" ? " has-menu" : "") + (selGuest === g.id ? " is-selected" : "") : ""),
+            "data-seat": i, title: g ? g.name + (m[1] ? " · " + m[0] : "") : "Silla " + (i + 1) + " libre"
+          }, [
+            el("span", { className: "pseat__chair", "aria-hidden": "true" }),
+            g ? el("span", { className: "pseat__av" }, [initials(g.name), m[1] ? el("span", { className: "pseat__menu", text: m[1] }) : null]) : null
+          ]);
+          if (g) { seat.setAttribute("data-guest", g.id); seat.draggable = true; seat.style.setProperty("--c", gr.color); }
           seat.style.left = s.w / 2 + p.x + "px";
           seat.style.top = s.h / 2 + p.y + "px";
+          seat.style.setProperty("--r", p.rot + "deg");
           node.appendChild(seat);
         }
+        node.appendChild(el("div", { className: "ptable__cloth", "aria-hidden": "true" }));
+        for (i = 0; i < t.seats; i++) {
+          p = platePos(t, i);
+          var plate = el("span", { className: "pplate" + (guestAt(t.id, i) ? " is-set" : ""), "aria-hidden": "true" });
+          plate.style.left = s.w / 2 + p.x + "px";
+          plate.style.top = s.h / 2 + p.y + "px";
+          node.appendChild(plate);
+        }
+        var b = badgeText(t);
+        node.appendChild(el("div", { className: "ptable__badge" + (b.num ? "" : " ptable__badge--name") }, [el("span", { text: b.text })]));
+        node.appendChild(el("div", { className: "ptable__label" }, [
+          el("strong", { text: tableName(t) }), el("span", { text: seated.length + "/" + t.seats })
+        ]));
+      } else {
+        node.appendChild(el("div", { className: "ptable__top" }, [el("strong", { text: tableName(t) })]));
       }
       return node;
     }
@@ -235,8 +336,12 @@
       stage.textContent = "";
       tables.forEach(function (t) { stage.appendChild(tableNode(t)); });
       if (!tables.length) {
-        stage.appendChild(el("p", { className: "plan__floor-empty", text: "El salón está vacío. Empieza añadiendo una mesa redonda o rectangular." }));
+        stage.appendChild(el("p", { className: "plan__floor-empty" }, [
+          el("span", { text: "El salón está vacío" }),
+          el("small", { text: "Añade mesas desde la pestaña «Elementos» de abajo." })
+        ]));
       }
+      floor.classList.toggle("is-picking", !!selGuest);
       rescale();
     }
 
@@ -259,9 +364,20 @@
       ].forEach(function (s) { stats.appendChild(el("span", null, [el("strong", { text: String(s[0]) }), " " + s[1]])); });
 
       var g = selGuest && byId(guests, selGuest);
-      hint.textContent = g
-        ? "Toca una mesa o una silla libre para sentar a " + g.name + ". Vuelve a tocarle para soltarle."
-        : "Arrastra un invitado a una mesa o a una silla. En móvil: tócalo y después toca la mesa.";
+      hint.textContent = g ? "Toca una mesa o una silla libre para sentar a " + g.name + "." : "";
+      hint.classList.toggle("is-visible", !!g);
+    }
+
+    function renderTabs() {
+      [tabGuests, tabElems].forEach(function (b) {
+        var on = b.getAttribute("data-tab") === tab;
+        b.setAttribute("aria-selected", on ? "true" : "false");
+        b.classList.toggle("is-active", on);
+      });
+      paneGuests.hidden = tab !== "invitados";
+      paneElems.hidden = tab !== "elementos";
+      search.parentNode.hidden = tab !== "invitados";
+      filterSel.hidden = tab !== "invitados";
     }
 
     function renderPrint() {
@@ -270,7 +386,7 @@
       tables.filter(isTable).forEach(function (t) {
         var seated = seatedAt(t.id).sort(function (a, b) { return a.seat - b.seat; });
         printList.appendChild(el("div", { className: "plan__print-table" }, [
-          el("h4", { text: (t.name || KINDS[t.kind].label) + " (" + seated.length + "/" + t.seats + ")" }),
+          el("h4", { text: tableName(t) + " (" + seated.length + "/" + t.seats + ")" }),
           el("ol", null, seated.map(function (g) {
             return el("li", { text: g.name + (g.menu !== "normal" ? " — " + MENUS[g.menu][0] : "") + (g.notes ? " (" + g.notes + ")" : "") });
           }))
@@ -286,24 +402,34 @@
       s.value = value;
       return s;
     }
+    function cardHead(title, sub, color) {
+      var dot = color ? el("span", { className: "plan__card-dot", "aria-hidden": "true" }) : null;
+      if (dot) dot.style.background = color;
+      return [
+        el("div", { className: "plan__card-head" }, [
+          el("h3", null, [dot, title]),
+          el("button", { type: "button", className: "plan__close", "data-close": "1", "aria-label": "Cerrar", text: "×" })
+        ]),
+        el("p", { className: "plan__card-sub", text: sub })
+      ];
+    }
 
     function renderInspector() {
       inspector.textContent = "";
       var t = selTable && byId(tables, selTable);
       var g = selGuest && byId(guests, selGuest);
+      room.classList.toggle("has-card", !!(t || g));
 
       if (g) {
         var name = el("input", { type: "text", maxlength: 120, value: g.name });
+        var group = hasGroup ? el("input", { type: "text", maxlength: 60, value: g.group_name || "", placeholder: "Familia, amigos de…", list: groupList.id }) : null;
         var sideSel = select(sides(), g.side), menu = select(MENUS, g.menu), rsvp = select(RSVP, g.rsvp);
         var notes = el("input", { type: "text", maxlength: 300, value: g.notes, placeholder: "Alergias, silla de bebé, movilidad…" });
         var at = g.table_id && byId(tables, g.table_id);
-        inspector.appendChild(el("form", { className: "plan__card", "data-form": "guest", novalidate: true }, [
-          el("div", { className: "plan__card-head" }, [
-            el("h3", { text: g.name }),
-            el("button", { type: "button", className: "plan__close", "data-close": "1", "aria-label": "Cerrar", text: "×" })
-          ]),
-          el("p", { className: "plan__card-sub", text: at ? "Sentado en " + (at.name || KINDS[at.kind].label) + ", silla " + (g.seat + 1) : "Sin mesa todavía" }),
+        inspector.appendChild(el("form", { className: "plan__card", novalidate: true }, cardHead(g.name,
+          at ? "Sentado en " + tableName(at) + ", silla " + (g.seat + 1) : "Sin mesa todavía", groupOf(g).color).concat([
           field("Nombre", name),
+          group ? field("Grupo / familia", group) : null,
           el("div", { className: "plan__card-row" }, [field("Lado", sideSel), field("Asistencia", rsvp)]),
           field("Menú", menu),
           field("Notas", notes),
@@ -312,11 +438,13 @@
             at ? el("button", { type: "button", className: "btn btn--sm btn--ghost", "data-unseat": g.id, text: "Quitar de la mesa" }) : null,
             el("button", { type: "button", className: "btn btn--sm btn--danger", "data-delguest": g.id, text: "Eliminar" })
           ])
-        ]));
+        ])));
         inspector.lastChild.addEventListener("submit", function (e) {
           e.preventDefault();
           if (!name.value.trim()) return name.focus();
-          update("wedding_guests", g, { name: name.value.trim(), side: sideSel.value, menu: menu.value, rsvp: rsvp.value, notes: notes.value.trim() }, "Invitado guardado.");
+          var patch = { name: name.value.trim(), side: sideSel.value, menu: menu.value, rsvp: rsvp.value, notes: notes.value.trim() };
+          if (group) patch.group_name = group.value.trim();
+          update("wedding_guests", g, patch, "Invitado guardado.");
         });
         return;
       }
@@ -325,15 +453,14 @@
         var tname = el("input", { type: "text", maxlength: 60, value: t.name, placeholder: KINDS[t.kind].label });
         var seats = isTable(t) ? el("input", { type: "number", min: 2, max: 30, step: 1, value: t.seats }) : null;
         var seated = seatedAt(t.id).sort(function (a, b) { return a.seat - b.seat; });
-        inspector.appendChild(el("form", { className: "plan__card", novalidate: true }, [
-          el("div", { className: "plan__card-head" }, [
-            el("h3", { text: t.name || KINDS[t.kind].label }),
-            el("button", { type: "button", className: "plan__close", "data-close": "1", "aria-label": "Cerrar", text: "×" })
-          ]),
-          el("p", { className: "plan__card-sub", text: KINDS[t.kind].label + (isTable(t) ? " · " + seated.length + " de " + t.seats + " plazas" : "") }),
+        inspector.appendChild(el("form", { className: "plan__card", novalidate: true }, cardHead(tableName(t),
+          KINDS[t.kind].label + (isTable(t) ? " · " + seated.length + " de " + t.seats + " plazas" : "")).concat([
           el("div", { className: "plan__card-row" + (seats ? " plan__card-row--table" : " plan__card-row--one") }, [field("Nombre", tname), seats ? field("Plazas", seats) : null]),
           seated.length ? el("ol", { className: "plan__seated" }, seated.map(function (x) {
+            var dot = el("span", { className: "plan__card-dot", "aria-hidden": "true" });
+            dot.style.background = groupOf(x).color;
             return el("li", null, [
+              dot,
               el("button", { type: "button", className: "plan__link", "data-pick": x.id, text: x.name }),
               x.menu !== "normal" ? el("small", { text: MENUS[x.menu][0] }) : null,
               el("button", { type: "button", className: "plan__close", "data-unseat": x.id, "aria-label": "Quitar a " + x.name, text: "×" })
@@ -343,7 +470,7 @@
             el("button", { type: "submit", className: "btn btn--sm", text: "Guardar" }),
             el("button", { type: "button", className: "btn btn--sm btn--danger", "data-deltable": t.id, text: "Eliminar" })
           ])
-        ]));
+        ])));
         inspector.lastChild.addEventListener("submit", function (e) {
           e.preventDefault();
           var patch = { name: tname.value.trim() };
@@ -363,13 +490,12 @@
           }
           update("wedding_tables", t, patch, "Mesa guardada.");
         });
-        return;
       }
-
     }
 
     function render() {
       renderStats();
+      renderTabs();
       renderList();
       renderFloor();
       renderInspector();
@@ -380,11 +506,15 @@
     function load() {
       return Promise.all([
         sb.from("wedding_tables").select("*").eq("wedding_id", wedding.id).order("created_at"),
-        sb.from("wedding_guests").select("*").eq("wedding_id", wedding.id).order("created_at")
+        sb.from("wedding_guests").select("*").eq("wedding_id", wedding.id).order("created_at"),
+        // ¿Está ya la columna de grupo? (si la migración aún no se ha aplicado, el plan funciona sin grupos)
+        sb.from("wedding_guests").select("group_name").limit(1)
       ]).then(function (res) {
         if (res[0].error || res[1].error) return toast(auth.friendly(res[0].error || res[1].error), true);
         tables = res[0].data;
         guests = res[1].data;
+        hasGroup = !res[2].error;
+        showGroupInputs();
         if (selGuest && !byId(guests, selGuest)) selGuest = null;
         if (selTable && !byId(tables, selTable)) selTable = null;
         render();
@@ -403,7 +533,7 @@
     function seatGuest(gid, tid, seatIdx) {
       var g = byId(guests, gid), t = byId(tables, tid);
       if (!g || !t) return;
-      if (!isTable(t)) return toast("En «" + (t.name || KINDS[t.kind].label) + "» no se sienta nadie.", true);
+      if (!isTable(t)) return toast("En «" + tableName(t) + "» no se sienta nadie.", true);
       if (seatIdx == null || guestAt(tid, seatIdx)) {
         if (g.table_id === tid && seatIdx == null) return;
         seatIdx = null;
@@ -441,8 +571,12 @@
       });
     }
 
-    function addGuests(names, sideKey, menu) {
-      var rows = names.map(function (n) { return { wedding_id: wedding.id, name: n.slice(0, 120), side: sideKey, menu: menu || "normal" }; });
+    function addGuests(names, sideKey, menu, group) {
+      var rows = names.map(function (n) {
+        var r = { wedding_id: wedding.id, name: n.slice(0, 120), side: sideKey, menu: menu || "normal" };
+        if (hasGroup && group) r.group_name = group.slice(0, 60);
+        return r;
+      });
       return sb.from("wedding_guests").insert(rows).select().then(function (r) {
         if (r.error) return fail(r.error), false;
         guests = guests.concat(r.data);
@@ -453,13 +587,13 @@
     }
 
     // ---------- Eventos ----------
-    toolbar.addEventListener("click", function (e) {
+    trayHead.addEventListener("click", function (e) {
+      var b = e.target.closest("[data-tab]");
+      if (b) { tab = b.getAttribute("data-tab"); renderTabs(); }
+    });
+    paneElems.addEventListener("click", function (e) {
       var b = e.target.closest("[data-add]");
       if (b) addElement(b.getAttribute("data-add"));
-    });
-    addSelect.addEventListener("change", function () {
-      if (addSelect.value) addElement(addSelect.value);
-      addSelect.value = "";
     });
     printBtn.addEventListener("click", function () {
       document.body.classList.add("printing-plan");
@@ -474,8 +608,8 @@
       e.preventDefault();
       var n = addName.value.trim();
       if (!n) return addName.focus();
-      addGuests([n], addSide.value, addMenu.value).then(function (ok) {
-        if (ok) { addName.value = ""; addMenu.value = "normal"; addName.focus(); }
+      addGuests([n], addSide.value, addMenu.value, addGroup.value.trim()).then(function (ok) {
+        if (ok) { addName.value = ""; addMenu.value = "normal"; addName.focus(); } // el grupo se mantiene para añadir a toda la familia
       });
     });
     bulk.querySelector("form").addEventListener("submit", function (e) {
@@ -483,10 +617,10 @@
       var names = bulkText.value.split(/\r?\n/).map(function (s) { return s.trim(); }).filter(Boolean);
       if (!names.length) return bulkText.focus();
       if (names.length > 300) return toast("Como mucho 300 de una vez.", true);
-      addGuests(names, bulkSide.value).then(function (ok) { if (ok) bulkText.value = ""; });
+      addGuests(names, bulkSide.value, null, bulkGroup.value.trim()).then(function (ok) { if (ok) bulkText.value = ""; });
     });
 
-    // Tocar un invitado de la lista: seleccionarlo (para sentarle y ver su ficha).
+    // Tocar un invitado de la bandeja: seleccionarlo (para sentarle y ver su ficha).
     list.addEventListener("click", function (e) {
       var c = e.target.closest("[data-guest]");
       if (!c) return;
@@ -512,7 +646,7 @@
       if ((b = e.target.closest("[data-deltable]"))) {
         var t = byId(tables, b.getAttribute("data-deltable"));
         var n = t ? seatedAt(t.id).length : 0;
-        if (!t || !confirm("¿Eliminar «" + (t.name || KINDS[t.kind].label) + "»?" + (n ? " Sus " + n + " invitados volverán a la lista." : ""))) return;
+        if (!t || !confirm("¿Eliminar «" + tableName(t) + "»?" + (n ? " Sus " + n + " invitados volverán a la lista." : ""))) return;
         tables = tables.filter(function (x) { return x !== t; });
         guests.forEach(function (x) { if (x.table_id === t.id) { x.table_id = null; x.seat = null; } });
         selTable = null;
@@ -521,13 +655,15 @@
       }
     });
 
-    // Arrastrar invitados (escritorio): desde la lista o desde una silla ocupada.
+    // Arrastrar invitados (escritorio): desde la bandeja o desde una silla ocupada.
     root.addEventListener("dragstart", function (e) {
       var c = e.target.closest && e.target.closest("[data-guest]");
       if (!c) return;
       e.dataTransfer.setData("text/plain", c.getAttribute("data-guest"));
       e.dataTransfer.effectAllowed = "move";
+      floor.classList.add("is-picking");
     });
+    root.addEventListener("dragend", function () { floor.classList.toggle("is-picking", !!selGuest); });
     stage.addEventListener("dragover", function (e) {
       var t = e.target.closest("[data-table]");
       stage.querySelectorAll(".is-over").forEach(function (n) { if (n !== t) n.classList.remove("is-over"); });
@@ -544,11 +680,11 @@
       var s = e.target.closest("[data-seat]");
       seatGuest(e.dataTransfer.getData("text/plain"), t.getAttribute("data-table"), s && !s.classList.contains("is-taken") ? Number(s.getAttribute("data-seat")) : null);
     });
-    list.addEventListener("dragover", function (e) { e.preventDefault(); list.classList.add("is-over"); });
-    list.addEventListener("dragleave", function () { list.classList.remove("is-over"); });
-    list.addEventListener("drop", function (e) {
+    tray.addEventListener("dragover", function (e) { e.preventDefault(); tray.classList.add("is-over"); });
+    tray.addEventListener("dragleave", function (e) { if (!tray.contains(e.relatedTarget)) tray.classList.remove("is-over"); });
+    tray.addEventListener("drop", function (e) {
       e.preventDefault();
-      list.classList.remove("is-over");
+      tray.classList.remove("is-over");
       var g = byId(guests, e.dataTransfer.getData("text/plain"));
       if (g && g.table_id) unseat(g.id);
     });
@@ -617,6 +753,7 @@
     });
 
     fillSideSelects();
+    showGroupInputs();
     render();
     load();
 

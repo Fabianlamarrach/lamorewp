@@ -15,7 +15,7 @@ Sitio estático (HTML + CSS + JS, sin build). Usuarios y datos en Supabase (supa
 - `assets/js/layout.js` — cabecera, menú (responsive) y footer compartidos; se editan en un solo sitio
 - `assets/js/session.js` — cliente Supabase, sesión y roles (`window.LAmore.auth`); se carga antes que `layout.js`
 - `assets/js/wedding-ui.js` — formulario de boda, presupuesto por partidas y checklist de tareas, compartidos por los dos paneles
-- `assets/js/seating-plan.js` — plan de mesas interactivo de cada boda (pestaña «Mesas» del admin y sección del panel de pareja)
+- `assets/js/seating-plan.js` — plan de mesas interactivo de cada boda, con el salón visto desde arriba y una bandeja de invitados agrupados por familia (pestaña «Mesas» del admin y sección del panel de pareja)
 - `assets/js/auth.js` — formularios de login y registro
 - `assets/js/panel.js` / `assets/js/admin.js` — lógica de cada panel
 - `assets/img/favicon.svg` — favicon
@@ -29,7 +29,7 @@ Auth y datos en Supabase (proyecto del cliente). El esquema está en `supabase/m
 | `weddings` | la boda: nombres, contacto, fecha y hora, tipo de ceremonia, lugar de ceremonia y banquete, ciudad, invitados, presupuesto total, planner y **estado** (consulta → presupuestada → confirmada → celebrada / cancelada). `owner_id` vacío = creada por el equipo, pendiente de que la pareja se registre |
 | `wedding_tasks` | checklist de tareas de cada boda, con fecha límite |
 | `wedding_tables` | plan de mesas: mesas (redonda / rectangular, con plazas) y elementos del salón (pista, barra, música, entrada) con su posición en el plano |
-| `wedding_guests` | invitados: lado de la pareja, asistencia, menú especial, notas y mesa + silla asignadas |
+| `wedding_guests` | invitados: grupo / familia, lado de la pareja, asistencia, menú especial, notas y mesa + silla asignadas |
 | `budget_items` | partidas del presupuesto: categoría, concepto, proveedor, estimado, real, pagado, fecha de pago |
 | `wedding_notes` | notas internas del equipo sobre cada boda (la pareja no las ve) |
 | `wedding_overview` (vista) | cada boda con sus totales de presupuesto, para el panel admin |
