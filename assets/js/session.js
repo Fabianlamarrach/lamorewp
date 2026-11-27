@@ -48,6 +48,8 @@
     if (/already registered|already exists/i.test(msg)) return "Ya existe una cuenta con ese correo.";
     if (/Password should be/i.test(msg)) return "La contraseña no es lo bastante segura (mínimo 8 caracteres).";
     if (/rate limit/i.test(msg)) return "Demasiados intentos. Espera unos minutos y vuelve a probar.";
+    if (/wedding_guests_seat_idx/i.test(msg)) return "Esa silla acaba de ocuparse. Vuelve a intentarlo.";
+    if (/weddings_pending_email_idx/i.test(msg)) return "Ya hay otra boda pendiente con ese correo de contacto.";
     if (/Failed to fetch|NetworkError/i.test(msg)) return "No hay conexión con el servidor. Inténtalo de nuevo.";
     return msg;
   }

@@ -39,8 +39,9 @@
       var wedding = r.data;
       renderHead(wedding);
       var budget = ui.budget(document.getElementById("budget"), wedding);
+      var plan = window.LAmore.seating.plan(document.getElementById("plan"), wedding);
       ui.weddingForm(document.getElementById("wedding-form"), wedding, {
-        onSaved: function (w) { renderHead(w); budget.setWedding(w); }
+        onSaved: function (w) { renderHead(w); budget.setWedding(w); plan.setWedding(w); }
       });
     });
   });

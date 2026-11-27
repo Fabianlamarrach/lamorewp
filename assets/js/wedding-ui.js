@@ -18,6 +18,41 @@
     "Lugar", "Catering", "Fotografía y vídeo", "Música", "Flores y decoración",
     "Vestuario", "Belleza", "Invitaciones", "Transporte", "Alojamiento", "Luna de miel", "Otros"
   ];
+  var CEREMONY = { "": "Sin decidir", civil: "Civil", religiosa: "Religiosa", simbolica: "Simbólica" };
+
+  // Reparto orientativo del presupuesto al crear una boda (suma 100 %).
+  var BUDGET_TEMPLATE = [
+    ["Lugar", "Alquiler del espacio", 15],
+    ["Catering", "Menú, bebida y servicio", 35],
+    ["Fotografía y vídeo", "Fotógrafo y vídeo", 10],
+    ["Música", "Ceremonia y fiesta (DJ / banda)", 5],
+    ["Flores y decoración", "Flores, centros y ambientación", 8],
+    ["Vestuario", "Vestido, traje y complementos", 10],
+    ["Belleza", "Peluquería y maquillaje", 2],
+    ["Invitaciones", "Save the date, invitaciones y papelería", 2],
+    ["Transporte", "Coches y traslados de invitados", 3],
+    ["Otros", "Imprevistos y detalles", 10]
+  ];
+
+  // Checklist base: [tarea, días antes de la boda].
+  var TASK_TEMPLATE = [
+    ["Definir presupuesto y número de invitados", 365],
+    ["Reservar lugar de ceremonia y banquete", 330],
+    ["Contratar fotógrafo y vídeo", 300],
+    ["Cerrar catering y prueba de menú", 270],
+    ["Contratar música (ceremonia y fiesta)", 240],
+    ["Enviar el «save the date»", 240],
+    ["Elegir vestido y traje", 180],
+    ["Flores y decoración", 180],
+    ["Alojamiento y transporte de invitados", 150],
+    ["Diseñar y encargar invitaciones", 120],
+    ["Enviar invitaciones", 90],
+    ["Trámites y documentación de la ceremonia", 60],
+    ["Confirmar asistencia y plan de mesas", 30],
+    ["Prueba de peluquería y maquillaje", 30],
+    ["Pagos finales a proveedores", 14],
+    ["Enviar el cronograma del día a proveedores", 7]
+  ];
 
   var money = new Intl.NumberFormat("es-ES", { style: "currency", currency: "EUR", maximumFractionDigits: 2 });
   var money0 = new Intl.NumberFormat("es-ES", { style: "currency", currency: "EUR", maximumFractionDigits: 0 });
@@ -104,8 +139,40 @@
 
   function uid(prefix) { return prefix + "-" + Math.random().toString(36).slice(2, 8); }
 
+  var EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+  function isoDate(d) {
+    return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
+  }
+
+  // Filas de budget_items según el reparto orientativo (importes a 0 si no hay presupuesto).
+  function budgetTemplate(weddingId, total) {
+    return BUDGET_TEMPLATE.map(function (t) {
+      return {
+        wedding_id: weddingId, category: t[0], concept: t[1],
+        estimated: total ? Math.round(total * t[2]) / 100 : 0
+      };
+    });
+  }
+
+  // Filas de wedding_tasks con la fecha límite calculada (nunca antes de hoy).
+  function taskTemplate(weddingId, weddingDate) {
+    var wd = parseDate(weddingDate);
+    var today = new Date();
+    today.setHours(0, 0, 0, 0);
+    return TASK_TEMPLATE.map(function (t) {
+      var due = null;
+      if (wd) {
+        var d = new Date(wd);
+        d.setDate(d.getDate() - t[1]);
+        due = isoDate(d < today ? today : d);
+      }
+      return { wedding_id: weddingId, title: t[0], due_date: due };
+    });
+  }
+
   // ---------- Formulario de la boda ----------
-  // opts: { admin: bool, onSaved(wedding) }
+  // opts: { admin: bool, planners: [{ id, name }], onSaved(wedding) }
   function weddingForm(container, wedding, opts) {
     opts = opts || {};
     var id = uid("w");
@@ -114,21 +181,31 @@
       for (var k in extra || {}) props[k] = extra[k];
       return el("input", props);
     }
+    function select(name, options) {
+      return el("select", { id: id + "-" + name, name: name }, Object.keys(options).map(function (k) {
+        return el("option", { value: k, text: options[k] });
+      }));
+    }
 
     var i = {
       partner1_name: input("partner1_name", "text", { maxlength: 120, required: true }),
       partner2_name: input("partner2_name", "text", { maxlength: 120, required: true }),
       wedding_date: input("wedding_date", "date"),
-      venue: input("venue", "text", { maxlength: 200, placeholder: "Finca, restaurante…" }),
+      ceremony_time: input("ceremony_time", "time"),
+      ceremony_type: select("ceremony_type", CEREMONY),
       city: input("city", "text", { maxlength: 120 }),
+      venue: input("venue", "text", { maxlength: 200, placeholder: "Iglesia, juzgado, finca…" }),
+      reception_venue: input("reception_venue", "text", { maxlength: 200, placeholder: "Si es distinto del de la ceremonia" }),
       guests_estimated: input("guests_estimated", "number", { min: 0, step: 1, inputmode: "numeric" }),
       budget_total: input("budget_total", "number", { min: 0, step: 100, inputmode: "decimal" })
     };
-    var statusSel = null;
     if (opts.admin) {
-      statusSel = el("select", { id: id + "-status", name: "status" }, Object.keys(STATUS).map(function (k) {
-        return el("option", { value: k, text: STATUS[k] });
-      }));
+      i.contact_email = input("contact_email", "email", { maxlength: 254, autocomplete: "off" });
+      i.contact_phone = input("contact_phone", "tel", { maxlength: 40, autocomplete: "off" });
+      i.status = select("status", STATUS);
+      var planners = { "": "Sin asignar" };
+      (opts.planners || []).forEach(function (p) { planners[p.id] = p.name; });
+      i.planner_id = select("planner_id", planners);
     }
 
     var msg = el("div", { className: "form__message", role: "status" });
@@ -139,16 +216,25 @@
         field(opts.admin ? "Nombre (1)" : "Tu nombre", i.partner1_name),
         field(opts.admin ? "Nombre (2)" : "Nombre de tu pareja", i.partner2_name)
       ]),
-      el("div", { className: "form__row" }, [field("Fecha de la boda", i.wedding_date), field("Ciudad", i.city)]),
-      field("Lugar", i.venue),
-      el("div", { className: "form__row" }, [field("Invitados previstos", i.guests_estimated), field("Presupuesto total (€)", i.budget_total)]),
-      statusSel ? field("Estado", statusSel) : null,
+      opts.admin ? el("div", { className: "form__row" }, [field("Correo de contacto", i.contact_email), field("Teléfono", i.contact_phone)]) : null,
+      el("div", { className: "form__row form__row--3" }, [
+        field("Fecha de la boda", i.wedding_date), field("Hora", i.ceremony_time), field("Ceremonia", i.ceremony_type)
+      ]),
+      el("div", { className: "form__row" }, [field("Lugar de la ceremonia", i.venue), field("Lugar del banquete", i.reception_venue)]),
+      el("div", { className: "form__row form__row--3" }, [
+        field("Ciudad", i.city), field("Invitados previstos", i.guests_estimated), field("Presupuesto total (€)", i.budget_total)
+      ]),
+      opts.admin ? el("div", { className: "form__row" }, [field("Estado", i.status), field("Planner", i.planner_id)]) : null,
       el("div", null, [btn])
     ]);
 
     function fill(w) {
       Object.keys(i).forEach(function (k) { i[k].value = w[k] == null ? "" : w[k]; });
-      if (statusSel) statusSel.value = w.status;
+      i.ceremony_time.value = w.ceremony_time ? String(w.ceremony_time).slice(0, 5) : "";
+      if (i.planner_id && w.planner_id && !i.planner_id.querySelector('option[value="' + w.planner_id + '"]')) {
+        i.planner_id.appendChild(el("option", { value: w.planner_id, text: w.planner_name || "Planner" }));
+        i.planner_id.value = w.planner_id;
+      }
     }
     fill(wedding);
 
@@ -157,11 +243,13 @@
       e.preventDefault();
       var guests = readAmount(i.guests_estimated, true);
       var budget = readAmount(i.budget_total, false);
+      var email = i.contact_email ? i.contact_email.value.trim().toLowerCase() : "";
       var valid = [
         setError(i.partner1_name, i.partner1_name.value.trim() ? "" : "Indica un nombre."),
         setError(i.partner2_name, i.partner2_name.value.trim() ? "" : "Indica un nombre."),
         setError(i.guests_estimated, isNaN(guests) ? "Introduce un número entero." : ""),
-        setError(i.budget_total, isNaN(budget) ? "Introduce un importe válido." : "")
+        setError(i.budget_total, isNaN(budget) ? "Introduce un importe válido." : ""),
+        i.contact_email ? setError(i.contact_email, email && !EMAIL_RE.test(email) ? "Correo no válido." : "") : true
       ].every(Boolean);
       if (!valid) return;
 
@@ -169,12 +257,20 @@
         partner1_name: i.partner1_name.value.trim(),
         partner2_name: i.partner2_name.value.trim(),
         wedding_date: i.wedding_date.value || null,
+        ceremony_time: i.ceremony_time.value || null,
+        ceremony_type: i.ceremony_type.value,
         venue: i.venue.value.trim(),
+        reception_venue: i.reception_venue.value.trim(),
         city: i.city.value.trim(),
         guests_estimated: guests,
         budget_total: budget
       };
-      if (statusSel) patch.status = statusSel.value;
+      if (opts.admin) {
+        patch.contact_email = email;
+        patch.contact_phone = i.contact_phone.value.trim();
+        patch.status = i.status.value;
+        patch.planner_id = i.planner_id.value || null;
+      }
 
       btn.disabled = true;
       sb.from("weddings").update(patch).eq("id", wedding.id).select().single().then(function (r) {
@@ -408,8 +504,135 @@
     };
   }
 
+  // ---------- Checklist de tareas ----------
+  // opts: { onChange(tasks) }
+  function tasks(container, wedding, opts) {
+    opts = opts || {};
+    var list = [];
+    var id = uid("t");
+
+    var progress = el("p", { className: "tasks__progress" });
+    var meter = el("div", { className: "meter", role: "img" }, [el("span")]);
+    var ul = el("ul", { className: "tasks" });
+    var empty = el("p", { className: "empty", text: "Sin tareas todavía. Añade la primera o genera el checklist base.", hidden: true });
+    var seed = el("button", { type: "button", className: "btn btn--sm btn--ghost", text: "Generar checklist base", hidden: true });
+    var msg = el("div", { className: "form__message", role: "status" });
+
+    var title = el("input", { id: id + "-title", type: "text", maxlength: 200, required: true, placeholder: "Ej.: reservar autobús de invitados" });
+    var due = el("input", { id: id + "-due", type: "date" });
+    var form = el("form", { className: "form tasks__form", novalidate: true }, [
+      el("div", { className: "tasks__add" }, [field("Nueva tarea", title), field("Fecha límite", due),
+        el("div", { className: "tasks__submit" }, [el("button", { className: "btn", type: "submit", text: "Añadir" })])])
+    ]);
+
+    function sorted() {
+      return list.slice().sort(function (a, b) {
+        if (a.done !== b.done) return a.done ? 1 : -1;
+        if (!a.due_date !== !b.due_date) return a.due_date ? -1 : 1;
+        if (a.due_date !== b.due_date) return a.due_date < b.due_date ? -1 : 1;
+        return a.created_at < b.created_at ? -1 : 1;
+      });
+    }
+
+    function render() {
+      var done = list.filter(function (t) { return t.done; }).length;
+      var pct = list.length ? Math.round((done / list.length) * 100) : 0;
+      progress.textContent = list.length ? done + " de " + list.length + " tareas hechas (" + pct + " %)" : "";
+      meter.hidden = !list.length;
+      meter.setAttribute("aria-label", pct + "% de tareas hechas");
+      meter.firstChild.style.width = pct + "%";
+      empty.hidden = list.length > 0;
+      seed.hidden = list.length > 0;
+
+      ul.textContent = "";
+      sorted().forEach(function (t) {
+        var days = daysUntil(t.due_date);
+        var late = !t.done && days != null && days < 0;
+        var cb = el("input", { type: "checkbox", id: id + "-" + t.id, "data-toggle": t.id });
+        cb.checked = t.done;
+        ul.appendChild(el("li", { className: "tasks__item" + (t.done ? " is-done" : "") + (late ? " is-late" : "") }, [
+          cb,
+          el("label", { for: cb.id }, [
+            el("span", { text: t.title }),
+            el("small", { text: t.due_date ? fmtDate(t.due_date) + (late ? " · atrasada" : !t.done && days <= 14 ? " · en " + days + " días" : "") : "Sin fecha" })
+          ]),
+          el("button", { type: "button", className: "btn btn--sm btn--danger", "data-del": t.id, "aria-label": "Eliminar tarea " + t.title, text: "×" })
+        ]));
+      });
+      if (opts.onChange) opts.onChange(list);
+    }
+
+    function fail(r) { showMessage(msg, window.LAmore.auth.friendly(r.error), false); }
+
+    function load() {
+      return sb.from("wedding_tasks").select("*").eq("wedding_id", wedding.id).then(function (r) {
+        if (r.error) return fail(r);
+        list = r.data;
+        render();
+      });
+    }
+
+    ul.addEventListener("change", function (e) {
+      var tid = e.target.getAttribute("data-toggle");
+      if (!tid) return;
+      var t = list.filter(function (x) { return x.id === tid; })[0];
+      var value = e.target.checked;
+      sb.from("wedding_tasks").update({ done: value }).eq("id", tid).then(function (r) {
+        if (r.error) { e.target.checked = !value; return fail(r); }
+        t.done = value;
+        render();
+      });
+    });
+
+    ul.addEventListener("click", function (e) {
+      var b = e.target.closest("[data-del]");
+      if (!b) return;
+      var t = list.filter(function (x) { return x.id === b.getAttribute("data-del"); })[0];
+      if (!t || !confirm("¿Eliminar la tarea «" + t.title + "»?")) return;
+      sb.from("wedding_tasks").delete().eq("id", t.id).then(function (r) {
+        if (r.error) return fail(r);
+        list = list.filter(function (x) { return x !== t; });
+        render();
+      });
+    });
+
+    seed.addEventListener("click", function () {
+      seed.disabled = true;
+      sb.from("wedding_tasks").insert(taskTemplate(wedding.id, wedding.wedding_date)).then(function (r) {
+        seed.disabled = false;
+        if (r.error) return fail(r);
+        load();
+      });
+    });
+
+    form.addEventListener("input", function () { setError(title, ""); });
+    form.addEventListener("submit", function (e) {
+      e.preventDefault();
+      if (!setError(title, title.value.trim() ? "" : "Escribe la tarea.")) return;
+      var btn = form.querySelector("button");
+      btn.disabled = true;
+      sb.from("wedding_tasks").insert({ wedding_id: wedding.id, title: title.value.trim(), due_date: due.value || null }).then(function (r) {
+        btn.disabled = false;
+        if (r.error) return fail(r);
+        form.reset();
+        load();
+      });
+    });
+
+    container.textContent = "";
+    [msg, progress, meter, ul, empty, seed, form].forEach(function (n) { container.appendChild(n); });
+    load();
+
+    return { setWedding: function (w) { wedding = w; } };
+  }
+
   window.LAmore.ui = {
     STATUS: STATUS,
+    CEREMONY: CEREMONY,
+    EMAIL_RE: EMAIL_RE,
+    budgetTemplate: budgetTemplate,
+    taskTemplate: taskTemplate,
+    tasks: tasks,
     el: el,
     parseDate: parseDate,
     fmtDate: fmtDate,
